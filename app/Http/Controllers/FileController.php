@@ -21,13 +21,14 @@ class FileController extends Controller
     {
         $this->authorize('view', $website);
         
-        // In production, list files from {$website->files_path}
-        // For now, we'll use local storage simulation
-        $path = 'websites/' . $website->id;
-        
+        $path = $website->files_path;
         $files = [];
-        if (Storage::exists($path)) {
-            $files = Storage::files($path);
+        
+        if (is_dir($path)) {
+            $files = array_diff(scandir($path), ['.', '..']);
+            $files = array_map(function($file) use ($path) {
+                return $path . '/' . $file;
+            }, $files);
         }
 
         return view('files.index', compact('website', 'files'));
@@ -50,12 +51,18 @@ class FileController extends Controller
                 ->withErrors($validator);
         }
 
-        $path = 'websites/' . $website->id;
+        $path = $website->files_path;
+        
+        // 确保目录存在
+        if (!is_dir($path)) {
+            mkdir($path, 0755, true);
+        }
+        
         $uploadedFiles = [];
 
         foreach ($request->file('files') as $file) {
             $filename = $file->getClientOriginalName();
-            $file->storeAs($path, $filename);
+            $file->move($path, $filename);
             $uploadedFiles[] = $filename;
         }
 
@@ -86,13 +93,13 @@ class FileController extends Controller
     {
         $this->authorize('update', $website);
 
-        $path = 'websites/' . $website->id . '/' . $filename;
+        $path = $website->files_path . '/' . $filename;
 
-        if (!Storage::exists($path)) {
+        if (!file_exists($path)) {
             abort(404, '文件不存在');
         }
 
-        Storage::delete($path);
+        unlink($path);
 
         return redirect()->route('files.index', $website)
             ->with('success', '文件已删除！');

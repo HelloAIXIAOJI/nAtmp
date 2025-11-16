@@ -55,8 +55,14 @@ class WebsiteController extends Controller
             'status' => 'active',
         ]);
 
-        // Generate nginx conf file
+        // Generate and write nginx conf file
         $this->generateNginxConf($website);
+        
+        // Create website files directory
+        $filesPath = $website->files_path;
+        if (!is_dir($filesPath)) {
+            mkdir($filesPath, 0755, true);
+        }
 
         return redirect()->route('websites.show', $website)
             ->with('success', '网站创建成功！网站ID: ' . $website->id);
@@ -116,11 +122,24 @@ class WebsiteController extends Controller
     {
         $this->authorize('delete', $website);
         
-        $websiteId = $website->id;
+        $confPath = $website->conf_path;
+        $filesPath = $website->files_path;
+        
+        // Delete website
         $website->delete();
 
-        // Note: In production, you would also delete the conf file and website files
-        // But we're not running commands on this development machine
+        // Delete conf file
+        if (file_exists($confPath)) {
+            unlink($confPath);
+        }
+        
+        // Delete website files directory
+        if (is_dir($filesPath)) {
+            $this->deleteDirectory($filesPath);
+        }
+        
+        // Reload nginx
+        exec('nginx -s reload 2>&1', $output, $returnCode);
 
         return redirect()->route('websites.index')
             ->with('success', '网站已删除！');
@@ -167,8 +186,40 @@ server {
 }
 CONF;
 
-        // In production, write to {$website->conf_path}
-        // For now, we just store the config for reference
+        // Write to /www/vhost/{website_id}.conf
+        $confPath = $website->conf_path;
+        $confDir = dirname($confPath);
+        
+        // Ensure directory exists
+        if (!is_dir($confDir)) {
+            mkdir($confDir, 0755, true);
+        }
+        
+        // Write config file
+        file_put_contents($confPath, $conf);
+        
+        // Reload nginx
+        exec('nginx -s reload 2>&1', $output, $returnCode);
+        
         return $conf;
+    }
+    
+    /**
+     * Recursively delete a directory.
+     */
+    private function deleteDirectory($dir)
+    {
+        if (!is_dir($dir)) {
+            return;
+        }
+        
+        $files = array_diff(scandir($dir), ['.', '..']);
+        
+        foreach ($files as $file) {
+            $path = $dir . '/' . $file;
+            is_dir($path) ? $this->deleteDirectory($path) : unlink($path);
+        }
+        
+        rmdir($dir);
     }
 }
